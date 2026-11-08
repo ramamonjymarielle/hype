@@ -415,6 +415,49 @@ const compressImageFile = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
+// Envoie à la boutique un e-mail récapitulatif de chaque nouvelle commande (via EmailJS).
+// Ne bloque jamais la commande : en cas d'échec, la commande reste enregistrée et visible dans l'admin.
+const sendOrderEmail = async (order: any): Promise<void> => {
+  try {
+    const ej = typeof window !== 'undefined' ? window.emailjs : undefined;
+    if (!ej) return;
+    const items: OrderItem[] = order.items || [];
+    const itemsList = items
+      .map((i) => `${i.q} × ${i.name} — ${i.color}${i.size ? ` — ${sizeLabel(i.size)} ${i.size}` : ''} — ${formatAr(i.price * i.q)}`)
+      .join('\n');
+    const zoneLabel = order.zone === 'peripherie' ? 'Périphérie / Environs' : 'Antananarivo ville';
+    await ej.send(
+      EJ.s,
+      EJ.t,
+      {
+        to_email: ADMIN_EMAIL,
+        reply_to: ADMIN_EMAIL,
+        subject: `Nouvelle commande HYPE ${order.no} — ${order.name} — ${formatAr(order.total)}`,
+        message: orderMessage(order),
+        order_no: order.no,
+        customer_name: order.name,
+        customer_phone: order.whatsapp,
+        customer_address: order.address,
+        customer_notes: order.notes || '',
+        items_list: itemsList,
+        zone: zoneLabel,
+        subtotal: formatAr(order.subtotal),
+        delivery_fee: formatAr(order.delivery_fee),
+        total: formatAr(order.total),
+        paid: formatAr(order.paid),
+        balance_items: formatAr(order.subtotal - order.paid),
+        balance_delivery: formatAr(order.delivery_fee),
+        balance_total: formatAr(order.balance),
+        pay_mode: order.pay_mode === '50' ? 'Acompte 50 % sur les articles' : 'Paiement intégral des articles',
+        mvola_ref: order.mvola_ref,
+      },
+      { publicKey: EJ.k }
+    );
+  } catch (error) {
+    console.warn('E-mail de commande non envoyé :', error);
+  }
+};
+
 export function App() {
   // Products and persistence
   const [rawProducts, setRawProductsState] = useState<RawProduct[]>(() =>
@@ -899,6 +942,7 @@ export function App() {
     const newOrder = data as unknown as Order;
     const no = newOrder.no;
     const whatsappMsg = orderMessage(newOrder);
+    void sendOrderEmail(newOrder);
     await fetchProducts();
     setLastOrder({
       no,
